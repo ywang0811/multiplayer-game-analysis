@@ -19,29 +19,53 @@ client = MongoClient()
 
 db = client.league_of_legends
 
-playtraces_gt_27 = db.playtraces_gt_27
+playtraces = db.playtraces_season11_72hrs
 
 
 # creates playtraces
-for i in db.matches_gt_27.find():
-    match_id = i['gameId']
-    if playtraces_gt_27.find_one({'id':{'$regex':'{}_.*'.format(match_id)}}):
+for match in db.matches_season11_72hrs.find():
+    match_id = match['gameId']
+    # check if playtrace already in db
+    if playtraces.find_one({'id':{'$regex':'{}_.*'.format(match_id)}}):
         continue
+    # get timeline data
     timeline_r = requests.get("https://na1.api.riotgames.com/lol/match/v3/timelines/by-match/%s?api_key=%s" 
                              % (match_id, api_key))
     timeline_data = json.loads(timeline_r.content)
     timeline_data['gameId'] = match_id
-    players = i['participantIdentities']
+    players = match['participantIdentities']
+    # get playtraces associated with each player
     for player in players:
-        summoner_id = player['player']['summonerId']
+        # bots don't have summoner id
+        try:
+            summoner_id = player['player']['summonerId']
+        except:
+            continue
         participant_id = player['participantId']
         playtrace_id = "{}_{}".format(match_id, summoner_id)
         print("checking {}".format(playtrace_id))
+        role = match['participants'][participant_id-1]['timeline']['role']
+        lane = match['participants'][participant_id-1]['timeline']['lane']
+        champion_id = match['participants'][participant_id-1]['championId']
+        highest_tier = match['participants'][participant_id-1]['highestAchievedSeasonTier']
+        summoner_level = match['yulia_player_lvls'][participant_id-1]
+        # construct playtraces_data
         playtraces_data = {
             'id': playtrace_id,
             "gameId": match_id,
             "summonerId": summoner_id,
-            "playtrace": []
+            "playtrace": [],
+            "role": role,
+            "lane": lane,
+            "championId": champion_id,
+            "highestAchievedSeasonTier": highest_tier,
+            "summonerLvl": summoner_level,
+            "hours_delta": match['hours_delta'],
+            "mapId": match['mapId'],
+            "gameMode": match['gameMode'],
+            "gameType": match['gameType'],
+            "gameVersion": match['gameVersion'],
+            "queueId": match['queueId']
                 }
         if 'frames' not in timeline_data:
             print(timeline_data)
@@ -54,6 +78,7 @@ for i in db.matches_gt_27.find():
                 elif "participantId" in event:
                     if event['participantId'] == participant_id:
                         playtraces_data['playtrace'].append(event)
+                # create _ASSIST, _KILL and _DEATH event types
                 elif "killerId" in event:
                     if event['killerId'] == participant_id:
                         playtraces_data['playtrace'].append(event)
@@ -67,13 +92,11 @@ for i in db.matches_gt_27.find():
                         playtraces_data['playtrace'].append(death_event)
                 else:
                     print (event)
-        if not playtraces_gt_27.find_one({'id': playtrace_id}):
-            playtraces_gt_27.insert_one(playtraces_data)
+        # make sure that the playtrace is not in the db
+        if not playtraces.find_one({'id': playtrace_id}):
+            playtraces.insert_one(playtraces_data)
                     
-        time.sleep(2)
-                    
-                    
-                    
+        time.sleep(4)
                     
                     
                     
